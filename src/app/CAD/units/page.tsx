@@ -8,7 +8,7 @@ import {
   RideAlongType, UNIT_CONFIG, addActivity, getRadioIdentifiersForVehicle, pacificTime, readCalls,
   readUnitSessions, updateUnitSession, writeCalls, writeUnitSessions
 } from "../../../lib/cad-demo";
-import { sendCallToMdt, sendUnitStatusToMdt } from "../../../lib/integration-client";
+import { fetchSharedUnitSessions, sendCallToMdt, sendUnitStatusToMdt } from "../../../lib/integration-client";
 
 const EMPTY_CREW = ["", "", "", ""];
 const UNIT_STATUSES: ActiveUnitSession["status"][] = [
@@ -31,7 +31,12 @@ export default function UnitManagementPage() {
   useEffect(() => {
     setClock(pacificTime());
     setSessions(readUnitSessions());
-    const timer = window.setInterval(() => setClock(pacificTime()), 1000);
+    const refreshShared = async () => {
+      const shared = await fetchSharedUnitSessions();
+      if (shared) { writeUnitSessions(shared); setSessions(shared); }
+    };
+    void refreshShared();
+    const timer = window.setInterval(() => { setClock(pacificTime()); void refreshShared(); }, 2000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -67,7 +72,7 @@ export default function UnitManagementPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function saveUnit() {
+  async function saveUnit() {
     setError("");
     const trimmedCrew = crewNames.map(name => name.trim()).filter(Boolean);
     const normalizedCrew = trimmedCrew.map(name => name.toLowerCase());
@@ -101,6 +106,8 @@ export default function UnitManagementPage() {
       } : session);
       writeUnitSessions(next);
       setSessions(next);
+      const updatedSession = next.find(session => session.id === editingSessionId);
+      if (updatedSession) await sendUnitStatusToMdt(updatedSession);
       addActivity(`${radioIdentifier} crew assignment updated`, "assignment");
       resetForm();
       return;
@@ -121,6 +128,7 @@ export default function UnitManagementPage() {
     const next = [...sessions, session];
     writeUnitSessions(next);
     setSessions(next);
+    await sendUnitStatusToMdt(session);
     addActivity(
       `${radioIdentifier} logged on with ${crewMembers.length} operational crew member${crewMembers.length === 1 ? "" : "s"}`,
       "status"
@@ -181,7 +189,7 @@ export default function UnitManagementPage() {
     addActivity(`${session.radioIdentifier} status changed to ${status}`, "status");
   }
 
-  function logOffUnit(session: ActiveUnitSession) {
+  async function logOffUnit(session: ActiveUnitSession) {
     const assignedCall = readCalls().find(call => call.assignedUnit === session.radioIdentifier);
     if (assignedCall) {
       setError(`${session.radioIdentifier} cannot be logged off while assigned to EMS ${assignedCall.emsNumber}. Reassign or complete the call first.`);
@@ -190,6 +198,7 @@ export default function UnitManagementPage() {
     const next = sessions.filter(item => item.id !== session.id);
     writeUnitSessions(next);
     setSessions(next);
+    await sendUnitStatusToMdt(session, false);
     if (editingSessionId === session.id) resetForm();
     addActivity(`${session.radioIdentifier} logged off`, "status");
   }
@@ -258,7 +267,7 @@ export default function UnitManagementPage() {
                     <label><span>Unit Status</span><select value={session.status} onChange={event => void changeStatus(session, event.target.value as ActiveUnitSession["status"])}>{UNIT_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}</select></label>
                     <div className="managed-unit-actions">
                       <button type="button" className="secondary-action" onClick={() => beginEdit(session)}><Pencil size={15}/> Change Crew</button>
-                      <button type="button" className="secondary-action danger-action" onClick={() => logOffUnit(session)}><X size={15}/> Log Off</button>
+                      <button type="button" className="secondary-action danger-action" onClick={() => void logOffUnit(session)}><X size={15}/> Log Off</button>
                     </div>
                   </div>
                 </article>;

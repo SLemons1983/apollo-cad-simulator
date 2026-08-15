@@ -28,6 +28,7 @@ import {
   readCompleted,
   readUnitSessions,
   updateUnitSession,
+  writeUnitSessions,
   writeCalls
 } from "../../lib/cad-demo";
 
@@ -59,17 +60,40 @@ export default function CadPortal() {
         const response = await fetch("/api/integration/mdt/state", { cache:"no-store" });
         const data = await response.json();
         if (data.ok) {
+          let sharedSessions: ActiveUnitSession[] = [];
+          if (data.sessionSync && Array.isArray(data.sessions)) {
+            sharedSessions = data.sessions.map((row:any) => ({
+              id: row.id,
+              physicalVehicle: row.physical_vehicle,
+              radioIdentifier: row.radio_identifier,
+              crewMembers: row.crew_members ?? [],
+              rideAlongType: row.ride_along_type ?? "None",
+              rideAlongName: row.ride_along_name ?? "",
+              status: row.status,
+              outOfServiceReason: row.out_of_service_reason || undefined,
+              activeCallNumber: row.active_call_number || undefined,
+              latitude: row.latitude ?? undefined,
+              longitude: row.longitude ?? undefined,
+              emergencyActive: Boolean(row.emergency_active),
+              loggedOnAt: row.logged_on_at,
+              updatedAt: row.updated_at
+            })) as ActiveUnitSession[];
+            writeUnitSessions(sharedSessions);
+            setUnitSessions(sharedSessions);
+          }
           const current = readCalls();
           let changed = false;
           const next = current.map(call => {
             const event = (data.statuses ?? []).find((e:any)=>e.radioIdentifier===call.assignedUnit && e.callNumber===call.cadCallNumber);
-            if (event?.status && event.status !== call.status) {
+            const shared = sharedSessions.find(session => session.radioIdentifier === call.assignedUnit && (!session.activeCallNumber || session.activeCallNumber === call.cadCallNumber));
+            const nextStatus = event?.status ?? shared?.status;
+            if (nextStatus && nextStatus !== call.status) {
               changed = true;
               setUnitSessions(updateUnitSession(call.assignedUnit, {
-                status: event.status,
+                status: nextStatus,
                 activeCallNumber: call.cadCallNumber
               }));
-              return {...call,status:event.status};
+              return {...call,status:nextStatus};
             }
             return call;
           });

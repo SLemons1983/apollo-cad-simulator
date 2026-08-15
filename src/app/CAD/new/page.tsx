@@ -24,7 +24,7 @@ import {
   updateUnitSession,
   writeCalls
 } from "../../../lib/cad-demo";
-import { sendCallToMdt } from "../../../lib/integration-client";
+import { fetchSharedUnitSessions, sendCallToMdt } from "../../../lib/integration-client";
 
 export default function NewCallPage() {
   const router = useRouter();
@@ -54,6 +54,7 @@ export default function NewCallPage() {
     setActiveCalls(active);
     setCompletedCalls(completed);
     setUnitSessions(readUnitSessions());
+    void fetchSharedUnitSessions().then(shared => { if (shared) setUnitSessions(shared); });
     const timer = window.setInterval(() => setClock(pacificTime()), 1000);
     return () => window.clearInterval(timer);
   }, []);

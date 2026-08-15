@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { signedPost } from "../../../../../lib/integration-security";
+import { UNIT_CONFIG } from "../../../../../lib/cad-demo";
 
 export const runtime = "nodejs";
 
@@ -29,12 +30,20 @@ export async function POST(request: Request) {
       );
     }
 
+    const unit = UNIT_CONFIG.find(item => item.radioId === session.radioIdentifier);
     const payload = {
-      eventType: "UNIT_STATUS_CHANGED",
+      eventType: session.active === false ? "UNIT_LOGGED_OFF" : "UNIT_SESSION_CHANGED",
+      active: session.active !== false,
       radioIdentifier: session.radioIdentifier,
       physicalVehicle: session.physicalVehicle,
+      station: unit?.station ?? "",
+      level: unit?.level ?? "ALS",
+      crewMembers: session.crewMembers ?? [],
+      rideAlongType: session.rideAlongType ?? "None",
+      rideAlongName: session.rideAlongName ?? "",
       status: session.status,
       outOfServiceReason: session.outOfServiceReason ?? "",
+      emergencyActive: Boolean(session.emergencyActive),
       source: "CAD",
       cadTimestamp: new Date().toISOString()
     };

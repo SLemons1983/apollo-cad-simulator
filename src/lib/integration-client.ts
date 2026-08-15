@@ -11,11 +11,11 @@ export async function sendCallToMdt(call: CadCall) {
   return data;
 }
 
-export async function sendUnitStatusToMdt(session: ActiveUnitSession) {
+export async function sendUnitStatusToMdt(session: ActiveUnitSession, active = true) {
   const response = await fetch("/api/integration/cad/unit-status", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(session)
+    body: JSON.stringify({ ...session, active })
   });
   const data = await response.json().catch(() => ({
     ok: false,
@@ -25,4 +25,30 @@ export async function sendUnitStatusToMdt(session: ActiveUnitSession) {
     console.warn("[Apollo CAD] MDT unit-status delivery is currently unavailable", data);
   }
   return data;
+}
+
+export async function fetchSharedUnitSessions(): Promise<ActiveUnitSession[] | null> {
+  try {
+    const response = await fetch("/api/integration/mdt/state", { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok || !data.ok || !data.sessionSync || !Array.isArray(data.sessions)) return null;
+    return data.sessions.map((row: any) => ({
+      id: row.id,
+      physicalVehicle: row.physical_vehicle,
+      radioIdentifier: row.radio_identifier,
+      crewMembers: row.crew_members ?? [],
+      rideAlongType: row.ride_along_type ?? "None",
+      rideAlongName: row.ride_along_name ?? "",
+      status: row.status,
+      outOfServiceReason: row.out_of_service_reason || undefined,
+      activeCallNumber: row.active_call_number || undefined,
+      latitude: row.latitude ?? undefined,
+      longitude: row.longitude ?? undefined,
+      emergencyActive: Boolean(row.emergency_active),
+      loggedOnAt: row.logged_on_at,
+      updatedAt: row.updated_at
+    })) as ActiveUnitSession[];
+  } catch {
+    return null;
+  }
 }

@@ -31,7 +31,7 @@ import {
   writeCalls,
   writeCompleted
 } from "../../../../lib/cad-demo";
-import { sendCallToMdt } from "../../../../lib/integration-client";
+import { fetchSharedUnitSessions, sendCallToMdt } from "../../../../lib/integration-client";
 
 type HistoryItem = { id:number; status:CadStatus; time:string; source:"CAD"|"MDT" };
 
@@ -55,6 +55,7 @@ export default function CallDetailPage() {
     const calls = readCalls();
     setAllActive(calls);
     setUnitSessions(readUnitSessions());
+    void fetchSharedUnitSessions().then(shared => { if (shared) setUnitSessions(shared); });
     const found = calls.find(c=>c.id===params.id) ?? null;
     setCall(found);
     if(found) setHistory([{id:1,status:found.status,time:found.createdTime,source:"CAD"}]);
@@ -71,8 +72,10 @@ export default function CallDetailPage() {
         const current=readCalls().find(c=>c.id===params.id);
         if(!current?.assignedUnit)return;
         const event=(data.statuses??[]).find((e:any)=>e.radioIdentifier===current.assignedUnit&&e.callNumber===current.cadCallNumber);
-        if(event&&event.status&&event.status!==current.status){
-          const updated={...current,status:event.status as CadStatus};
+        const shared=Array.isArray(data.sessions)?data.sessions.find((row:any)=>row.radio_identifier===current.assignedUnit&&(!row.active_call_number||row.active_call_number===current.cadCallNumber)):null;
+        const nextStatus=event?.status??shared?.status;
+        if(nextStatus&&nextStatus!==current.status){
+          const updated={...current,status:nextStatus as CadStatus};
           writeCalls(readCalls().map(c=>c.id===updated.id?updated:c));
           setCall(updated);
           setAllActive(readCalls());
@@ -82,7 +85,7 @@ export default function CallDetailPage() {
               activeCallNumber: updated.cadCallNumber
             })
           );
-          setHistory(h=>[...h,{id:Date.now(),status:updated.status,time:event.timestamp?.slice(11,19)??pacificTime(),source:"MDT"}]);
+          setHistory(h=>[...h,{id:Date.now(),status:updated.status,time:event?.timestamp?.slice(11,19)??pacificTime(),source:"MDT"}]);
           addActivity(`${updated.assignedUnit} ${updated.status} on EMS ${updated.emsNumber} (MDT)`,"status");
         }
       }catch{}
