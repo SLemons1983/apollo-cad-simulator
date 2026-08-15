@@ -45,6 +45,51 @@ export type CadActivity = {
   type: "call" | "assignment" | "status" | "note" | "complete";
 };
 
+export type CrewMember = {
+  employeeId: string;
+  displayName: string;
+};
+
+export type RideAlongType =
+  | "None"
+  | "Paramedic Intern"
+  | "EMT Student"
+  | "Other Ride Along";
+
+export type UnitStatus =
+  | Exclude<CadStatus, "Unassigned">
+  | "Out of Service";
+
+export type ActiveUnitSession = {
+  id: string;
+  physicalVehicle: string;
+  radioIdentifier: string;
+  deviceId?: string;
+  crewMembers: CrewMember[];
+  rideAlongType: RideAlongType;
+  rideAlongName?: string;
+  status: UnitStatus;
+  outOfServiceReason?: string;
+  activeCallNumber?: string;
+  latitude?: number;
+  longitude?: number;
+  emergencyActive: boolean;
+  loggedOnAt: string;
+  updatedAt: string;
+};
+
+export const PHYSICAL_VEHICLES = [
+  "300", "301", "302", "303", "305", "310",
+  "315", "320", "325", "330", "335"
+] as const;
+
+export const RIDE_ALONG_TYPES: RideAlongType[] = [
+  "None",
+  "Paramedic Intern",
+  "EMT Student",
+  "Other Ride Along"
+];
+
 export const UNIT_CONFIG = [
   { radioId:"S300", cadId:"S300", vehicle:"300", level:"SUP", station:"Supervisor" },
   { radioId:"S301", cadId:"S301", vehicle:"301", level:"SUP", station:"Supervisor" },
@@ -73,6 +118,27 @@ export const UNIT_CONFIG = [
   { radioId:"335", cadId:"Medic 335", vehicle:"335", level:"ALS", station:"Additional Unit" },
   { radioId:"9335", cadId:"Medic 9335", vehicle:"335", level:"BLS", station:"Additional Unit" },
 ] as const;
+
+const SHARED_AMBULANCE_RADIO_IDENTIFIERS = [
+  "311", "9311",
+  "313", "9313",
+  "316", "9316",
+  "318", "9318"
+] as const;
+
+export function getRadioIdentifiersForVehicle(physicalVehicle: string) {
+  if (["300", "301", "302", "303"].includes(physicalVehicle)) {
+    return UNIT_CONFIG.filter(unit => unit.radioId === `S${physicalVehicle}`);
+  }
+
+  const compatible = new Set<string>([
+    physicalVehicle,
+    `9${physicalVehicle}`,
+    ...SHARED_AMBULANCE_RADIO_IDENTIFIERS
+  ]);
+
+  return UNIT_CONFIG.filter(unit => compatible.has(unit.radioId));
+}
 
 function pacificParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -108,7 +174,7 @@ export function pacificTime(date = new Date()) {
 }
 
 export function formatEmsNumber(sequence: number) {
-  return sequence < 1000 ? String(sequence).padStart(3, "0") : String(sequence);
+  return String(sequence).padStart(4, "0");
 }
 
 export function buildCadCallNumber(sequence: number, date = new Date()) {
@@ -133,188 +199,114 @@ export function makeIdentifiers(active: CadCall[], completed: CadCall[]) {
   };
 }
 
-const demoDate = pacificDateKey();
+export const INITIAL_CALLS: CadCall[] = [];
 
-export const DEMO_CALLS: CadCall[] = [
-  {
-    id: `${demoDate}0055`,
-    cadCallNumber: `${demoDate}0055`,
-    emsNumber: "055",
-    dailySequence: 55,
-    priority: "5",
-    zone: "J01",
-    problem: "Trans - ALS",
-    facility: "Adventist Medical Center Reedley",
-    address: "372 W Cypress Ave",
-    city: "Reedley",
-    state: "CA",
-    zip: "93654",
-    suite: "er-1",
-    assignedUnit: "Medic 313",
-    vehicle: "310",
-    station: "Reedley",
-    status: "At Scene",
-    holdBackRequired: false,
-    dispatchComments: "Ambulance Bay Code 2013\nNew Door Code for ER: 7010#\neq. gurney, cardiac monitor\nsnd. bayardo\nrcv. nakai\ndx. acute renal failure with hyperkalemia",
-    premiseNotes: "Pick Up: Ambulance Bay Code 2013\nPick Up: New Door Code for ER: 7010#\nDest: Ambulance Bay Code 2013",
-    cautionNotes: "",
-    createdTime: "13:30:04"
-  },
-  {
-    id: `${demoDate}0056`,
-    cadCallNumber: `${demoDate}0056`,
-    emsNumber: "056",
-    dailySequence: 56,
-    priority: "3",
-    zone: "R02",
-    problem: "Sick Person",
-    facility: "Palm Village",
-    address: "703 W Herbert Ave",
-    city: "Reedley",
-    state: "CA",
-    zip: "93654",
-    suite: "216",
-    assignedUnit: "Medic 311",
-    vehicle: "305",
-    station: "Reedley",
-    status: "En Route",
-    holdBackRequired: false,
-    dispatchComments: "75F reported altered. Caller advises patient awake now.",
-    premiseNotes: "Use west driveway for ambulance access.",
-    cautionNotes: "",
-    createdTime: "13:36:22"
-  },
-  {
-    id: `${demoDate}0057`,
-    cadCallNumber: `${demoDate}0057`,
-    emsNumber: "057",
-    dailySequence: 57,
-    priority: "2",
-    zone: "P01",
-    problem: "Traffic Collision",
-    facility: "",
-    address: "Manning Ave & Reed Ave",
-    city: "Reedley",
-    state: "CA",
-    zip: "93654",
-    suite: "",
-    assignedUnit: "Medic 316",
-    vehicle: "315",
-    station: "Parlier",
-    status: "Holding Back",
-    holdBackRequired: true,
-    dispatchComments: "Two vehicles. Law enforcement requested. Unit to hold back until scene secured.",
-    premiseNotes: "",
-    cautionNotes: "Hold back required until released by dispatch.",
-    createdTime: "13:40:51"
-  },
-  {
-    id: `${demoDate}0058`,
-    cadCallNumber: `${demoDate}0058`,
-    emsNumber: "058",
-    dailySequence: 58,
-    priority: "3",
-    zone: "OC1",
-    problem: "Breathing Problems",
-    facility: "",
-    address: "46000 Dunlap Rd",
-    city: "Orange Cove",
-    state: "CA",
-    zip: "93646",
-    suite: "",
-    assignedUnit: "",
-    vehicle: "",
-    station: "",
-    status: "Unassigned",
-    holdBackRequired: false,
-    dispatchComments: "Caller reports shortness of breath. Patient conscious and breathing.",
-    premiseNotes: "Long driveway; residence is behind main house.",
-    cautionNotes: "",
-    createdTime: "13:43:12"
-  }
-];
+export const INITIAL_COMPLETED_CALLS: CadCall[] = [];
 
-export const DEMO_COMPLETED: CadCall[] = [
-  {
-    id: `${demoDate}0054`,
-    cadCallNumber: `${demoDate}0054`,
-    emsNumber: "054",
-    dailySequence: 54,
-    priority: "3",
-    zone: "J01",
-    problem: "Fall",
-    facility: "",
-    address: "1512 E Manning Ave",
-    city: "Reedley",
-    state: "CA",
-    zip: "93654",
-    suite: "",
-    assignedUnit: "Medic 318",
-    vehicle: "320",
-    station: "Orange Cove",
-    status: "Unit Available",
-    holdBackRequired: false,
-    dispatchComments: "Completed demonstration call.",
-    premiseNotes: "",
-    cautionNotes: "",
-    createdTime: "12:18:07",
-    completedTime: "12:57:41"
-  }
-];
-
-export const DEMO_ACTIVITY: CadActivity[] = [
-  { id: 1, time: "13:43:12", text: "EMS 058 created — unassigned", type: "call" },
-  { id: 2, time: "13:40:51", text: "Medic 316 Holding Back on EMS 057", type: "status" },
-  { id: 3, time: "13:36:22", text: "Medic 311 assigned to EMS 056", type: "assignment" },
-  { id: 4, time: "13:30:04", text: "Medic 313 assigned to EMS 055", type: "assignment" }
-];
+export const INITIAL_ACTIVITY: CadActivity[] = [];
 
 export function readCalls(): CadCall[] {
-  if (typeof window === "undefined") return DEMO_CALLS;
-  const raw = window.localStorage.getItem("apollo-cad-demo-calls-v4-1");
+  if (typeof window === "undefined") return INITIAL_CALLS;
+  const raw = window.localStorage.getItem("apollo-cad-calls-v5");
   if (!raw) {
-    window.localStorage.setItem("apollo-cad-demo-calls-v4-1", JSON.stringify(DEMO_CALLS));
-    return DEMO_CALLS;
+    window.localStorage.setItem("apollo-cad-calls-v5", JSON.stringify(INITIAL_CALLS));
+    return INITIAL_CALLS;
   }
-  try { return JSON.parse(raw) as CadCall[]; } catch { return DEMO_CALLS; }
+  try { return JSON.parse(raw) as CadCall[]; } catch { return INITIAL_CALLS; }
 }
 
 export function writeCalls(calls: CadCall[]) {
   if (typeof window !== "undefined") {
-    window.localStorage.setItem("apollo-cad-demo-calls-v4-1", JSON.stringify(calls));
+    window.localStorage.setItem("apollo-cad-calls-v5", JSON.stringify(calls));
   }
 }
 
 export function readCompleted(): CadCall[] {
-  if (typeof window === "undefined") return DEMO_COMPLETED;
-  const raw = window.localStorage.getItem("apollo-cad-demo-completed-v4-1");
+  if (typeof window === "undefined") return INITIAL_COMPLETED_CALLS;
+  const raw = window.localStorage.getItem("apollo-cad-completed-v5");
   if (!raw) {
-    window.localStorage.setItem("apollo-cad-demo-completed-v4-1", JSON.stringify(DEMO_COMPLETED));
-    return DEMO_COMPLETED;
+    window.localStorage.setItem("apollo-cad-completed-v5", JSON.stringify(INITIAL_COMPLETED_CALLS));
+    return INITIAL_COMPLETED_CALLS;
   }
-  try { return JSON.parse(raw) as CadCall[]; } catch { return DEMO_COMPLETED; }
+  try { return JSON.parse(raw) as CadCall[]; } catch { return INITIAL_COMPLETED_CALLS; }
 }
 
 export function writeCompleted(calls: CadCall[]) {
   if (typeof window !== "undefined") {
-    window.localStorage.setItem("apollo-cad-demo-completed-v4-1", JSON.stringify(calls));
+    window.localStorage.setItem("apollo-cad-completed-v5", JSON.stringify(calls));
   }
 }
 
 export function readActivity(): CadActivity[] {
-  if (typeof window === "undefined") return DEMO_ACTIVITY;
-  const raw = window.localStorage.getItem("apollo-cad-demo-activity-v4-1");
+  if (typeof window === "undefined") return INITIAL_ACTIVITY;
+  const raw = window.localStorage.getItem("apollo-cad-activity-v5");
   if (!raw) {
-    window.localStorage.setItem("apollo-cad-demo-activity-v4-1", JSON.stringify(DEMO_ACTIVITY));
-    return DEMO_ACTIVITY;
+    window.localStorage.setItem("apollo-cad-activity-v5", JSON.stringify(INITIAL_ACTIVITY));
+    return INITIAL_ACTIVITY;
   }
-  try { return JSON.parse(raw) as CadActivity[]; } catch { return DEMO_ACTIVITY; }
+  try { return JSON.parse(raw) as CadActivity[]; } catch { return INITIAL_ACTIVITY; }
 }
 
 export function writeActivity(activity: CadActivity[]) {
   if (typeof window !== "undefined") {
-    window.localStorage.setItem("apollo-cad-demo-activity-v4-1", JSON.stringify(activity));
+    window.localStorage.setItem("apollo-cad-activity-v5", JSON.stringify(activity));
   }
+}
+
+const UNIT_SESSIONS_STORAGE_KEY = "apollo-cad-unit-sessions-v5";
+
+export function readUnitSessions(): ActiveUnitSession[] {
+  if (typeof window === "undefined") return [];
+
+  const raw = window.localStorage.getItem(UNIT_SESSIONS_STORAGE_KEY);
+  if (!raw) {
+    window.localStorage.setItem(UNIT_SESSIONS_STORAGE_KEY, "[]");
+    return [];
+  }
+
+  try {
+    const sessions = JSON.parse(raw);
+    return Array.isArray(sessions) ? sessions as ActiveUnitSession[] : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeUnitSessions(sessions: ActiveUnitSession[]) {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(
+      UNIT_SESSIONS_STORAGE_KEY,
+      JSON.stringify(sessions)
+    );
+  }
+}
+
+export function updateUnitSession(
+  radioIdentifier: string,
+  updates: Partial<
+    Pick<
+      ActiveUnitSession,
+      "status" |
+      "outOfServiceReason" |
+      "activeCallNumber" |
+      "latitude" |
+      "longitude" |
+      "emergencyActive"
+    >
+  >
+) {
+  const next = readUnitSessions().map(session =>
+    session.radioIdentifier === radioIdentifier
+      ? {
+          ...session,
+          ...updates,
+          updatedAt: new Date().toISOString()
+        }
+      : session
+  );
+
+  writeUnitSessions(next);
+  return next;
 }
 
 export function addActivity(text: string, type: CadActivity["type"]) {

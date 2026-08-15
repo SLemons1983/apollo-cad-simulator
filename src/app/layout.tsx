@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Apollo CAD Simulator",
-  description: "Apollo MDT CAD development and demonstration simulator"
+  title: "Apollo CAD",
+  description: "Apollo computer-aided dispatch operations"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -12,6 +12,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ActiveUnitSession,
   CadCall,
   UNIT_CONFIG,
   addActivity,
@@ -19,15 +20,18 @@ import {
   pacificTime,
   readCalls,
   readCompleted,
+  readUnitSessions,
+  updateUnitSession,
   writeCalls
 } from "../../../lib/cad-demo";
 import { sendCallToMdt } from "../../../lib/integration-client";
 
 export default function NewCallPage() {
   const router = useRouter();
-  const [clock, setClock] = useState(pacificTime());
+  const [clock, setClock] = useState("");
   const [activeCalls, setActiveCalls] = useState<CadCall[]>([]);
   const [completedCalls, setCompletedCalls] = useState<CadCall[]>([]);
+  const [unitSessions, setUnitSessions] = useState<ActiveUnitSession[]>([]);
   const [priority, setPriority] = useState("3");
   const [zone, setZone] = useState("");
   const [problem, setProblem] = useState("");
@@ -44,10 +48,12 @@ export default function NewCallPage() {
   const [assignedUnit, setAssignedUnit] = useState("");
 
   useEffect(() => {
+    setClock(pacificTime());
     const active = readCalls();
     const completed = readCompleted();
     setActiveCalls(active);
     setCompletedCalls(completed);
+    setUnitSessions(readUnitSessions());
     const timer = window.setInterval(() => setClock(pacificTime()), 1000);
     return () => window.clearInterval(timer);
   }, []);
@@ -58,15 +64,29 @@ export default function NewCallPage() {
   );
 
   const availableUnits = useMemo(() => {
-    const busy = new Set(activeCalls.filter(c => c.assignedUnit).map(c => c.assignedUnit));
-    return UNIT_CONFIG.filter(u => !busy.has(u.cadId));
-  }, [activeCalls]);
+    const busy = new Set(
+      activeCalls
+        .filter(call => call.assignedUnit)
+        .map(call => call.assignedUnit)
+    );
+
+    return unitSessions.filter(
+      session =>
+        session.status !== "Out of Service" &&
+        !busy.has(session.radioIdentifier)
+    );
+  }, [activeCalls, unitSessions]);
 
   async function createCall() {
     const latestActive = readCalls();
     const latestCompleted = readCompleted();
     const ids = makeIdentifiers(latestActive, latestCompleted);
-    const unit = UNIT_CONFIG.find(u => u.cadId === assignedUnit);
+    const session = unitSessions.find(
+      item => item.radioIdentifier === assignedUnit
+    );
+    const unit = UNIT_CONFIG.find(
+      item => item.radioId === assignedUnit
+    );
 
     const status: CadCall["status"] = assignedUnit
       ? holdBackRequired ? "Holding Back" : "Dispatched"
@@ -87,7 +107,7 @@ export default function NewCallPage() {
       zip,
       suite,
       assignedUnit,
-      vehicle: unit?.vehicle ?? "",
+      vehicle: session?.physicalVehicle ?? "",
       station: unit?.station ?? "",
       status,
       holdBackRequired,
@@ -98,6 +118,14 @@ export default function NewCallPage() {
     };
 
     writeCalls([call, ...latestActive]);
+
+    if (assignedUnit) {
+      updateUnitSession(assignedUnit, {
+        status: status as ActiveUnitSession["status"],
+        activeCallNumber: call.cadCallNumber
+      });
+    }
+
     addActivity(
       assignedUnit
         ? `EMS ${ids.emsNumber} (${ids.cadCallNumber}) created and assigned to ${assignedUnit}`
@@ -117,7 +145,7 @@ export default function NewCallPage() {
         </div>
         <div className="pacific-clock"><span>Pacific Time</span><strong>{clock}</strong></div>
         <div className="topbar-actions">
-          <div className="system-pill"><span className="system-dot"/> Simulator Online</div>
+          <div className="system-pill"><span className="system-dot"/> CAD Online</div>
           <button className="icon-button" aria-label="Notifications"><BellRing size={18}/></button>
         </div>
       </header>
@@ -189,9 +217,21 @@ export default function NewCallPage() {
                 <span>Assign Available CAD / Radio Unit</span>
                 <select value={assignedUnit} onChange={e=>setAssignedUnit(e.target.value)}>
                   <option value="">Unassigned</option>
-                  {availableUnits.map(unit => (
-                    <option key={unit.cadId} value={unit.radioId}>{unit.radioId.startsWith("S")?unit.radioId:`${unit.radioId}`} — Vehicle {unit.vehicle} — {unit.station}</option>
-                  ))}
+                  {availableUnits.map(session => {
+                    const unit = UNIT_CONFIG.find(
+                      item => item.radioId === session.radioIdentifier
+                    );
+
+                    return (
+                      <option
+                        key={session.id}
+                        value={session.radioIdentifier}
+                      >
+                        {session.radioIdentifier} — Vehicle {session.physicalVehicle}
+                        {unit?.station ? ` — ${unit.station}` : ""}
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
             </div>

@@ -18,6 +18,7 @@ import {
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
+  ActiveUnitSession,
   CadCall,
   CadStatus,
   UNIT_CONFIG,
@@ -25,6 +26,8 @@ import {
   pacificTime,
   readCalls,
   readCompleted,
+  readUnitSessions,
+  updateUnitSession,
   writeCalls,
   writeCompleted
 } from "../../../../lib/cad-demo";
@@ -41,14 +44,17 @@ export default function CallDetailPage() {
   const params = useParams<{ id:string }>();
   const router = useRouter();
   const [call,setCall] = useState<CadCall|null>(null);
-  const [clock,setClock] = useState(pacificTime());
+  const [clock,setClock] = useState("");
   const [history,setHistory] = useState<HistoryItem[]>([]);
   const [search,setSearch] = useState("");
   const [allActive,setAllActive] = useState<CadCall[]>([]);
+  const [unitSessions,setUnitSessions] = useState<ActiveUnitSession[]>([]);
 
   useEffect(()=>{
+    setClock(pacificTime());
     const calls = readCalls();
     setAllActive(calls);
+    setUnitSessions(readUnitSessions());
     const found = calls.find(c=>c.id===params.id) ?? null;
     setCall(found);
     if(found) setHistory([{id:1,status:found.status,time:found.createdTime,source:"CAD"}]);
@@ -70,6 +76,12 @@ export default function CallDetailPage() {
           writeCalls(readCalls().map(c=>c.id===updated.id?updated:c));
           setCall(updated);
           setAllActive(readCalls());
+          setUnitSessions(
+            updateUnitSession(updated.assignedUnit, {
+              status: updated.status as ActiveUnitSession["status"],
+              activeCallNumber: updated.cadCallNumber
+            })
+          );
           setHistory(h=>[...h,{id:Date.now(),status:updated.status,time:event.timestamp?.slice(11,19)??pacificTime(),source:"MDT"}]);
           addActivity(`${updated.assignedUnit} ${updated.status} on EMS ${updated.emsNumber} (MDT)`,"status");
         }
@@ -80,12 +92,19 @@ export default function CallDetailPage() {
     return()=>window.clearInterval(timer);
   },[params.id]);
 
-  const currentUnit = useMemo(()=>UNIT_CONFIG.find(u=>u.radioId===call?.assignedUnit),[call]);
+  const currentUnit = useMemo(
+    ()=>UNIT_CONFIG.find(unit=>unit.radioId===call?.assignedUnit),
+    [call]
+  );
   const busyUnits = useMemo(
     ()=>new Set(allActive.filter(c=>c.id!==call?.id && c.assignedUnit).map(c=>c.assignedUnit)),
     [allActive,call?.id]
   );
-  const assignableUnits = UNIT_CONFIG.filter(u=>!busyUnits.has(u.cadId));
+  const assignableUnits = unitSessions.filter(
+    session =>
+      session.status !== "Out of Service" &&
+      !busyUnits.has(session.radioIdentifier)
+  );
 
   function persist(updated:CadCall){
     setCall(updated);
@@ -99,24 +118,54 @@ export default function CallDetailPage() {
     const time=pacificTime();
     const updated={...call,status};
     persist(updated);
-    if(updated.assignedUnit) await sendCallToMdt(updated);
+
+    if(updated.assignedUnit) {
+      setUnitSessions(
+        updateUnitSession(updated.assignedUnit, {
+          status: status as ActiveUnitSession["status"],
+          activeCallNumber: updated.cadCallNumber
+        })
+      );
+      await sendCallToMdt(updated);
+    }
     setHistory(h=>[...h,{id:Date.now(),status,time,source}]);
     addActivity(`${call.assignedUnit || "Unassigned unit"} ${status} on EMS ${call.emsNumber}`, "status");
   }
 
   async function assignUnit(cadId:string){
     if(!call) return;
+    const session=unitSessions.find(
+      item=>item.radioIdentifier===cadId
+    );
     const unit=UNIT_CONFIG.find(u=>u.radioId===cadId);
     const previous=call.assignedUnit;
     const updated:CadCall={
       ...call,
       assignedUnit:cadId,
-      vehicle:unit?.vehicle ?? "",
+      vehicle:session?.physicalVehicle ?? "",
       station:unit?.station ?? "",
       status:cadId ? (call.holdBackRequired ? "Holding Back" : "Dispatched") : "Unassigned"
     };
     persist(updated);
-    if(cadId) await sendCallToMdt(updated);
+
+    let nextSessions = readUnitSessions();
+
+    if(previous && previous !== cadId) {
+      nextSessions = updateUnitSession(previous, {
+        status: "Unit Available",
+        activeCallNumber: undefined
+      });
+    }
+
+    if(cadId) {
+      nextSessions = updateUnitSession(cadId, {
+        status: updated.status as ActiveUnitSession["status"],
+        activeCallNumber: updated.cadCallNumber
+      });
+      await sendCallToMdt(updated);
+    }
+
+    setUnitSessions(nextSessions);
     if(cadId){
       addActivity(`${cadId} ${previous ? `reassigned from ${previous}` : "assigned"} to EMS ${call.emsNumber}`, "assignment");
     } else {
@@ -130,6 +179,16 @@ export default function CallDetailPage() {
     const remaining=readCalls().filter(c=>c.id!==call.id);
     writeCalls(remaining);
     writeCompleted([completedCall,...readCompleted()]);
+
+    if(call.assignedUnit) {
+      setUnitSessions(
+        updateUnitSession(call.assignedUnit, {
+          status: "Unit Available",
+          activeCallNumber: undefined
+        })
+      );
+    }
+
     addActivity(`EMS ${call.emsNumber} completed by ${call.assignedUnit || "Dispatch"}`, "complete");
     router.push("/CAD");
   }
@@ -143,7 +202,7 @@ export default function CallDetailPage() {
       <header className="topbar">
         <div className="brand"><div className="brand-mark"><Radio size={22}/></div><div><div className="eyebrow top-eyebrow">APOLLO OPERATIONS</div><h1>CAD Call Detail</h1></div></div>
         <div className="pacific-clock"><span>Pacific Time</span><strong>{clock}</strong></div>
-        <div className="topbar-actions"><div className="system-pill"><span className="system-dot"/> Simulator Online</div><button className="icon-button" aria-label="Notifications"><BellRing size={18}/></button></div>
+        <div className="topbar-actions"><div className="system-pill"><span className="system-dot"/> CAD Online</div><button className="icon-button" aria-label="Notifications"><BellRing size={18}/></button></div>
       </header>
 
       <div className="call-subnav">
@@ -156,22 +215,79 @@ export default function CallDetailPage() {
 
       <section className="workspace">
         <aside className="unit-panel">
-          <div className="panel-heading"><div><div className="eyebrow">SYSTEM STATUS</div><h2>Unit Board</h2></div><span className="count-badge">{UNIT_CONFIG.length}</span></div>
+          <div className="panel-heading"><div><div className="eyebrow">SYSTEM STATUS</div><h2>Unit Board</h2></div><span className="count-badge">{unitSessions.length}</span></div>
           <label className="search-box"><Search size={17}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search units"/></label>
           <div className="unit-list">
-            {UNIT_CONFIG.filter(u=>u.cadId.toLowerCase().includes(search.toLowerCase())).map(unit=>{
-              const assignedElsewhere=allActive.find(c=>c.id!==call.id && c.assignedUnit===unit.cadId);
-              return (
-                <div className={`unit-row static ${unit.cadId===call.assignedUnit?"selected":""}`} key={unit.cadId}>
-                  <div className="unit-icon">{unit.level==="SUP"?<ShieldAlert size={19}/>:<Ambulance size={19}/>}</div>
-                  <div className="unit-copy">
-                    <div className="unit-title-line"><strong>{unit.cadId}</strong><span className={`level-badge level-${unit.level.toLowerCase()}`}>{unit.level}</span></div>
-                    <span>Vehicle {unit.vehicle} · {unit.station}</span>
-                    <span className="unit-status"><CircleDot size={11}/> {unit.cadId===call.assignedUnit ? call.status : assignedElsewhere ? `EMS ${assignedElsewhere.emsNumber}` : "Unit Available"}</span>
+            {unitSessions
+              .filter(session =>
+                session.radioIdentifier
+                  .toLowerCase()
+                  .includes(search.toLowerCase())
+              )
+              .map(session => {
+                const unit = UNIT_CONFIG.find(
+                  item => item.radioId === session.radioIdentifier
+                );
+                const assignedElsewhere = allActive.find(
+                  activeCall =>
+                    activeCall.id !== call.id &&
+                    activeCall.assignedUnit === session.radioIdentifier
+                );
+
+                return (
+                  <div
+                    className={`unit-row static ${
+                      session.radioIdentifier === call.assignedUnit
+                        ? "selected"
+                        : ""
+                    }`}
+                    key={session.id}
+                  >
+                    <div className="unit-icon">
+                      {unit?.level === "SUP"
+                        ? <ShieldAlert size={19}/>
+                        : <Ambulance size={19}/>}
+                    </div>
+
+                    <div className="unit-copy">
+                      <div className="unit-title-line">
+                        <strong>{session.radioIdentifier}</strong>
+                        {unit && (
+                          <span className={`level-badge level-${unit.level.toLowerCase()}`}>
+                            {unit.level}
+                          </span>
+                        )}
+                      </div>
+
+                      <span>
+                        Vehicle {session.physicalVehicle}
+                        {unit?.station ? ` · ${unit.station}` : ""}
+                      </span>
+
+                      <span>
+                        Crew: {session.crewMembers
+                          .map(member => member.displayName)
+                          .join(", ")}
+                      </span>
+
+                      <span className="unit-status">
+                        <CircleDot size={11}/>
+                        {session.radioIdentifier === call.assignedUnit
+                          ? call.status
+                          : assignedElsewhere
+                            ? `EMS ${assignedElsewhere.emsNumber}`
+                            : session.status}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+
+            {unitSessions.length === 0 && (
+              <div className="empty-state">
+                No units are logged on.
+              </div>
+            )}
           </div>
         </aside>
 
@@ -235,7 +351,21 @@ export default function CallDetailPage() {
                   <span>CAD / Radio Unit</span>
                   <select value={call.assignedUnit} onChange={e=>assignUnit(e.target.value)}>
                     <option value="">Unassigned</option>
-                    {assignableUnits.map(unit=><option key={unit.cadId} value={unit.radioId}>{unit.radioId.startsWith("S")?unit.radioId:`${unit.radioId}`} — Vehicle {unit.vehicle} — {unit.station}</option>)}
+                    {assignableUnits.map(session => {
+                      const unit = UNIT_CONFIG.find(
+                        item => item.radioId === session.radioIdentifier
+                      );
+
+                      return (
+                        <option
+                          key={session.id}
+                          value={session.radioIdentifier}
+                        >
+                          {session.radioIdentifier} — Vehicle {session.physicalVehicle}
+                          {unit?.station ? ` — ${unit.station}` : ""}
+                        </option>
+                      );
+                    })}
                   </select>
                 </label>
               </div>

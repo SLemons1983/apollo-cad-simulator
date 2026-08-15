@@ -18,13 +18,17 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  ActiveUnitSession,
   CadActivity,
   CadCall,
   UNIT_CONFIG,
   pacificTime,
   readActivity,
   readCalls,
-  readCompleted
+  readCompleted,
+  readUnitSessions,
+  updateUnitSession,
+  writeCalls
 } from "../../lib/cad-demo";
 
 type ViewMode = "active" | "completed";
@@ -33,16 +37,19 @@ export default function CadPortal() {
   const [calls, setCalls] = useState<CadCall[]>([]);
   const [completed, setCompleted] = useState<CadCall[]>([]);
   const [activity, setActivity] = useState<CadActivity[]>([]);
-  const [clock, setClock] = useState(pacificTime());
+  const [unitSessions, setUnitSessions] = useState<ActiveUnitSession[]>([]);
+  const [clock, setClock] = useState("");
   const [search, setSearch] = useState("");
   const [view, setView] = useState<ViewMode>("active");
   const [unitFilter, setUnitFilter] = useState<string>("");
 
   useEffect(() => {
     const refresh = () => {
+      setClock(pacificTime());
       setCalls(readCalls());
       setCompleted(readCompleted());
       setActivity(readActivity());
+      setUnitSessions(readUnitSessions());
     };
     refresh();
     const timer = window.setInterval(async () => {
@@ -56,10 +63,17 @@ export default function CadPortal() {
           let changed = false;
           const next = current.map(call => {
             const event = (data.statuses ?? []).find((e:any)=>e.radioIdentifier===call.assignedUnit && e.callNumber===call.cadCallNumber);
-            if (event?.status && event.status !== call.status) { changed = true; return {...call,status:event.status}; }
+            if (event?.status && event.status !== call.status) {
+              changed = true;
+              setUnitSessions(updateUnitSession(call.assignedUnit, {
+                status: event.status,
+                activeCallNumber: call.cadCallNumber
+              }));
+              return {...call,status:event.status};
+            }
             return call;
           });
-          if (changed) { localStorage.setItem("apollo-cad-demo-calls-v4-1", JSON.stringify(next)); setCalls(next); }
+          if (changed) { writeCalls(next); setCalls(next); }
         }
       } catch {}
     }, 1500);
@@ -100,7 +114,7 @@ export default function CadPortal() {
         </div>
         <div className="pacific-clock"><span>Pacific Time</span><strong>{clock}</strong></div>
         <div className="topbar-actions">
-          <div className="system-pill"><span className="system-dot"/> Simulator Online</div>
+          <div className="system-pill"><span className="system-dot"/> CAD Online</div>
           <button className="icon-button" aria-label="Notifications"><BellRing size={18}/></button>
         </div>
       </header>
@@ -109,7 +123,7 @@ export default function CadPortal() {
         <aside className="unit-panel">
           <div className="panel-heading">
             <div><div className="eyebrow">SYSTEM STATUS</div><h2>Unit Board</h2></div>
-            <span className="count-badge">{UNIT_CONFIG.length}</span>
+            <span className="count-badge">{unitSessions.length}</span>
           </div>
 
           <button
@@ -120,37 +134,81 @@ export default function CadPortal() {
           </button>
 
           <div className="unit-list">
-            {UNIT_CONFIG.map((unit) => {
-              const active = callForUnit(unit.cadId);
+            {unitSessions.map((session) => {
+              const unit = UNIT_CONFIG.find(
+                item => item.radioId === session.radioIdentifier
+              );
+              const active = callForUnit(session.radioIdentifier);
+
               return (
                 <button
-                  className={`unit-row ${unitFilter === unit.cadId ? "selected" : ""}`}
-                  key={unit.cadId}
+                  className={`unit-row ${unitFilter === session.radioIdentifier ? "selected" : ""}`}
+                  key={session.id}
                   onClick={() => {
                     if (active) {
                       window.location.href = `/CAD/calls/${active.id}`;
                     } else {
-                      setUnitFilter(unit.cadId === unitFilter ? "" : unit.cadId);
+                      setUnitFilter(
+                        session.radioIdentifier === unitFilter
+                          ? ""
+                          : session.radioIdentifier
+                      );
                     }
                   }}
                 >
                   <div className="unit-icon">
-                    {unit.level === "SUP" ? <ShieldAlert size={19}/> : <Ambulance size={19}/>}
+                    {unit?.level === "SUP"
+                      ? <ShieldAlert size={19}/>
+                      : <Ambulance size={19}/>}
                   </div>
+
                   <div className="unit-copy">
                     <div className="unit-title-line">
-                      <strong>{unit.cadId}</strong>
-                      <span className={`level-badge level-${unit.level.toLowerCase()}`}>{unit.level}</span>
+                      <strong>{session.radioIdentifier}</strong>
+                      {unit && (
+                        <span className={`level-badge level-${unit.level.toLowerCase()}`}>
+                          {unit.level}
+                        </span>
+                      )}
                     </div>
-                    <span>Vehicle {unit.vehicle} · {unit.station}</span>
-                    <span className="unit-status">
-                      <CircleDot size={11}/> {active ? active.status : "Unit Available"}
+
+                    <span>
+                      Vehicle {session.physicalVehicle}
+                      {unit?.station ? ` · ${unit.station}` : ""}
                     </span>
-                    {active && <span className="unit-incident">EMS {active.emsNumber} · Open call</span>}
+
+                    <span>
+                      Crew: {session.crewMembers
+                        .map(member => member.displayName)
+                        .join(", ")}
+                    </span>
+
+                    <span className="unit-status">
+                      <CircleDot size={11}/>
+                      {active ? active.status : session.status}
+                    </span>
+
+                    {session.status === "Out of Service" && session.outOfServiceReason && (
+                      <span className="unit-oos-reason">
+                        Reason: {session.outOfServiceReason}
+                      </span>
+                    )}
+
+                    {active && (
+                      <span className="unit-incident">
+                        EMS {active.emsNumber} · Open call
+                      </span>
+                    )}
                   </div>
                 </button>
               );
             })}
+
+            {unitSessions.length === 0 && (
+              <div className="empty-state">
+                No units are logged on.
+              </div>
+            )}
           </div>
         </aside>
 
@@ -159,9 +217,12 @@ export default function CadPortal() {
             <div>
               <div className="eyebrow">DISPATCH OPERATIONS</div>
               <h2>{view === "active" ? "Active Calls" : "Completed Calls"}</h2>
-              <p>Realistic multi-call CAD simulator for Apollo MDT development and demonstrations.</p>
+              <p>Multi-call dispatch operations for Apollo CAD and MDT.</p>
             </div>
-            <Link href="/CAD/new" className="primary-action"><Plus size={18}/> New Call</Link>
+            <div className="create-call-actions">
+              <Link href="/CAD/units" className="secondary-action">Manage Units</Link>
+              <Link href="/CAD/new" className="primary-action"><Plus size={18}/> New Call</Link>
+            </div>
           </div>
 
           <div className="portal-tabs">
@@ -219,14 +280,20 @@ export default function CadPortal() {
               </Link>
             ))}
             {visibleCalls.length === 0 && (
-              <div className="empty-state">No calls match the current view or filter.</div>
+              <div className="empty-state">
+                {search || unitFilter
+                  ? "No calls match the current search or unit filter."
+                  : view === "active"
+                    ? "No active calls. Create a new call when dispatch activity begins."
+                    : "No completed calls are recorded."}
+              </div>
             )}
           </div>
         </section>
 
         <aside className="activity-panel">
           <div className="activity-heading">
-            <div><div className="eyebrow">LIVE SIMULATOR LOG</div><h3>Dispatch Activity</h3></div>
+            <div><div className="eyebrow">LIVE OPERATIONS LOG</div><h3>Dispatch Activity</h3></div>
             <Activity size={20}/>
           </div>
           <div className="activity-feed">
@@ -239,6 +306,9 @@ export default function CadPortal() {
                 </div>
               </div>
             ))}
+            {activity.length === 0 && (
+              <div className="empty-state">No dispatch activity recorded.</div>
+            )}
           </div>
           <div className="activity-note">
             <Clock3 size={15}/>
