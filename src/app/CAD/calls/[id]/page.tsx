@@ -116,6 +116,14 @@ export default function CallDetailPage() {
     setAllActive(next);
   }
 
+  async function setHoldBackRequired(required:boolean){
+    if(!call)return;
+    const updated={...call,holdBackRequired:required};
+    persist(updated);
+    addActivity(`Hold Back ${required?"required":"cleared"} for EMS ${call.emsNumber}`,"note");
+    if(updated.assignedUnit)await sendCallToMdt(updated);
+  }
+
   async function changeStatus(status:CadStatus,source:"CAD"|"MDT"="CAD"){
     if(!call) return;
     const time=pacificTime();
@@ -328,8 +336,8 @@ export default function CallDetailPage() {
               <div className={`holdback-box ${call.holdBackRequired?"active":""}`}>
                 <div><strong>Hold Back Required</strong><span>Dispatch-controlled incident instruction</span></div>
                 <div className="segmented">
-                  <button type="button" className={!call.holdBackRequired?"on":""} onClick={()=>persist({...call,holdBackRequired:false})}>NO</button>
-                  <button type="button" className={call.holdBackRequired?"danger-on":""} onClick={()=>persist({...call,holdBackRequired:true})}>YES</button>
+                  <button type="button" className={!call.holdBackRequired?"on":""} onClick={()=>void setHoldBackRequired(false)}>NO</button>
+                  <button type="button" className={call.holdBackRequired?"danger-on":""} onClick={()=>void setHoldBackRequired(true)}>YES</button>
                 </div>
               </div>
             </section>
@@ -406,7 +414,7 @@ export default function CallDetailPage() {
               <p>EMS # {call.emsNumber}</p>
               <p>{call.cadCallNumber}</p>
             </div>
-            <button className="dispatch-button" type="button" disabled={!call.assignedUnit}><MessageSquareText size={18}/> Send Update to MDT</button>
+            <button className="dispatch-button" type="button" disabled={!call.assignedUnit} onClick={()=>void sendCallToMdt(call)}><MessageSquareText size={18}/> Send Update to MDT</button>
           </section>
 
           <section className="side-card">
