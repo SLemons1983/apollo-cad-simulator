@@ -1,4 +1,4 @@
-import type { ActiveUnitSession, CadCall } from "./cad-demo";
+import type { ActiveUnitSession, CadCall, CadPost } from "./cad-demo";
 export async function sendCallToMdt(call: CadCall) {
   if (!call.assignedUnit) return {ok:false,error:"unassigned"};
   const response = await fetch("/api/integration/cad/send", {
@@ -9,6 +9,22 @@ export async function sendCallToMdt(call: CadCall) {
     console.warn("[Apollo CAD] MDT call delivery is currently unavailable", data);
   }
   return data;
+}
+
+export async function completeCallOnMdt(call: CadCall) {
+  const response = await fetch("/api/integration/cad/complete", {
+    method:"POST", headers:{"content-type":"application/json"},
+    body:JSON.stringify({radioIdentifier:call.assignedUnit,callNumber:call.cadCallNumber})
+  });
+  return response.json().catch(()=>({ok:false,error:"Invalid integration response"}));
+}
+
+export async function sendPostToMdt(session: ActiveUnitSession, post: CadPost) {
+  const response = await fetch("/api/integration/cad/post", {
+    method:"POST", headers:{"content-type":"application/json"},
+    body:JSON.stringify({session,post})
+  });
+  return response.json().catch(()=>({ok:false,error:"Invalid integration response"}));
 }
 
 export async function sendUnitStatusToMdt(session: ActiveUnitSession, active = true) {

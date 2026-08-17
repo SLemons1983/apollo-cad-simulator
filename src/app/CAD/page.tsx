@@ -19,9 +19,11 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import {
   ActiveUnitSession,
+  CAD_POSTS,
   CadActivity,
   CadCall,
   UNIT_CONFIG,
+  addActivity,
   pacificTime,
   readActivity,
   readCalls,
@@ -31,6 +33,7 @@ import {
   writeUnitSessions,
   writeCalls
 } from "../../lib/cad-demo";
+import { sendPostToMdt } from "../../lib/integration-client";
 
 type ViewMode = "active" | "completed";
 
@@ -43,6 +46,7 @@ export default function CadPortal() {
   const [search, setSearch] = useState("");
   const [view, setView] = useState<ViewMode>("active");
   const [unitFilter, setUnitFilter] = useState<string>("");
+  const [postingUnit,setPostingUnit]=useState("");
 
   useEffect(() => {
     const refresh = () => {
@@ -85,7 +89,7 @@ export default function CadPortal() {
           let changed = false;
           const next = current.map(call => {
             const event = (data.statuses ?? []).find((e:any)=>e.radioIdentifier===call.assignedUnit && e.callNumber===call.cadCallNumber);
-            const shared = sharedSessions.find(session => session.radioIdentifier === call.assignedUnit && (!session.activeCallNumber || session.activeCallNumber === call.cadCallNumber));
+            const shared = sharedSessions.find(session => session.radioIdentifier === call.assignedUnit && session.activeCallNumber === call.cadCallNumber);
             const nextStatus = event?.status ?? shared?.status;
             if (nextStatus && nextStatus !== call.status) {
               changed = true;
@@ -127,6 +131,23 @@ export default function CadPortal() {
 
   function callForUnit(cadId: string) {
     return calls.find((c) => c.assignedUnit === cadId);
+  }
+
+  const unitsAwaitingPost=unitSessions.filter(session=>session.status==="Unit Available"&&!session.activeCallNumber&&!callForUnit(session.radioIdentifier));
+
+  async function assignPost(session:ActiveUnitSession,postId:string){
+    const post=CAD_POSTS.find(item=>item.id===postId);
+    if(!post)return;
+    setPostingUnit(session.radioIdentifier);
+    const result=await sendPostToMdt(session,post);
+    if(result.ok){
+      const activeCallNumber=result.payload?.callNumber;
+      const next=updateUnitSession(session.radioIdentifier,{activeCallNumber});
+      setUnitSessions(next);
+      addActivity(`${session.radioIdentifier} assigned to ${post.name} Post — ${post.coverage}`,"assignment");
+      setActivity(readActivity());
+    }
+    setPostingUnit("");
   }
 
   return (
@@ -248,6 +269,11 @@ export default function CadPortal() {
               <Link href="/CAD/new" className="primary-action"><Plus size={18}/> New Call</Link>
             </div>
           </div>
+
+          {view==="active"&&unitsAwaitingPost.map(session=><section className="post-assignment-prompt" key={session.id}>
+            <div><strong>POST ASSIGNMENT REQUIRED — {session.radioIdentifier}</strong><span>This unit is available and awaiting a deployment post.</span></div>
+            <div>{CAD_POSTS.map(post=><button disabled={postingUnit===session.radioIdentifier} key={post.id} onClick={()=>void assignPost(session,post.id)}><b>{post.name}</b><small>{post.coverage}</small></button>)}</div>
+          </section>)}
 
           <div className="portal-tabs">
             <button className={view === "active" ? "active" : ""} onClick={() => setView("active")}>

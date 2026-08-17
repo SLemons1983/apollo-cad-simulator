@@ -1,8 +1,11 @@
 export type CadStatus =
   | "Unassigned"
+  | "Logged In - Not Available"
   | "Dispatched"
   | "En Route"
+  | "Hold Back Required"
   | "Holding Back"
+  | "Scene Secure"
   | "At Scene"
   | "Depart Scene"
   | "At Destination"
@@ -59,6 +62,19 @@ export type RideAlongType =
 export type UnitStatus =
   | Exclude<CadStatus, "Unassigned">
   | "Out of Service";
+
+export type CadPost = {
+  id: "reedley" | "parlier" | "orange-cove";
+  name: string;
+  coverage: string;
+  address: string;
+};
+
+export const CAD_POSTS: CadPost[] = [
+  { id:"reedley", name:"Reedley", coverage:"1st - 5th Out", address:"500 E. 11th Street, Reedley, CA 93654" },
+  { id:"parlier", name:"Parlier", coverage:"1st - 2nd Out", address:"320 S Newmark Ave, Parlier, CA 93648" },
+  { id:"orange-cove", name:"Orange Cove", coverage:"1st - 2nd Out", address:"725 Anchor Ave, Orange Cove, CA 93646" }
+];
 
 export type ActiveUnitSession = {
   id: string;

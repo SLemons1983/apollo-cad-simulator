@@ -31,12 +31,12 @@ import {
   writeCalls,
   writeCompleted
 } from "../../../../lib/cad-demo";
-import { fetchSharedUnitSessions, sendCallToMdt } from "../../../../lib/integration-client";
+import { completeCallOnMdt, fetchSharedUnitSessions, sendCallToMdt, sendUnitStatusToMdt } from "../../../../lib/integration-client";
 
 type HistoryItem = { id:number; status:CadStatus; time:string; source:"CAD"|"MDT" };
 
 const statuses: CadStatus[] = [
-  "Dispatched","En Route","Holding Back","At Scene","Depart Scene","At Destination",
+  "Dispatched","En Route","Hold Back Required","Holding Back","Scene Secure","At Scene","Depart Scene","At Destination",
   "Pending Paperwork","Unit Available","En Route Post","In Area","At Post"
 ];
 
@@ -72,7 +72,7 @@ export default function CallDetailPage() {
         const current=readCalls().find(c=>c.id===params.id);
         if(!current?.assignedUnit)return;
         const event=(data.statuses??[]).find((e:any)=>e.radioIdentifier===current.assignedUnit&&e.callNumber===current.cadCallNumber);
-        const shared=Array.isArray(data.sessions)?data.sessions.find((row:any)=>row.radio_identifier===current.assignedUnit&&(!row.active_call_number||row.active_call_number===current.cadCallNumber)):null;
+        const shared=Array.isArray(data.sessions)?data.sessions.find((row:any)=>row.radio_identifier===current.assignedUnit&&row.active_call_number===current.cadCallNumber):null;
         const nextStatus=event?.status??shared?.status;
         if(nextStatus&&nextStatus!==current.status){
           const updated={...current,status:nextStatus as CadStatus};
@@ -121,7 +121,15 @@ export default function CallDetailPage() {
     const updated={...call,holdBackRequired:required};
     persist(updated);
     addActivity(`Hold Back ${required?"required":"cleared"} for EMS ${call.emsNumber}`,"note");
-    if(updated.assignedUnit)await sendCallToMdt(updated);
+    if(updated.assignedUnit){
+      const nextStatus:CadStatus=required?"Hold Back Required":"Scene Secure";
+      const nextSessions=updateUnitSession(updated.assignedUnit,{status:nextStatus as ActiveUnitSession["status"],activeCallNumber:updated.cadCallNumber});
+      setUnitSessions(nextSessions);
+      const session=nextSessions.find(item=>item.radioIdentifier===updated.assignedUnit);
+      if(session)await sendUnitStatusToMdt(session);
+      persist({...updated,status:nextStatus});
+      await sendCallToMdt({...updated,status:nextStatus});
+    }
   }
 
   async function changeStatus(status:CadStatus,source:"CAD"|"MDT"="CAD"){
@@ -137,6 +145,8 @@ export default function CallDetailPage() {
           activeCallNumber: updated.cadCallNumber
         })
       );
+      const session=readUnitSessions().find(item=>item.radioIdentifier===updated.assignedUnit);
+      if(session)await sendUnitStatusToMdt(session);
       await sendCallToMdt(updated);
     }
     setHistory(h=>[...h,{id:Date.now(),status,time,source}]);
@@ -155,7 +165,7 @@ export default function CallDetailPage() {
       assignedUnit:cadId,
       vehicle:session?.physicalVehicle ?? "",
       station:unit?.station ?? "",
-      status:cadId ? (call.holdBackRequired ? "Holding Back" : "Dispatched") : "Unassigned"
+      status:cadId ? (call.holdBackRequired ? "Hold Back Required" : "Dispatched") : "Unassigned"
     };
     persist(updated);
 
@@ -184,7 +194,7 @@ export default function CallDetailPage() {
     }
   }
 
-  function completeCall(){
+  async function completeCall(){
     if(!call) return;
     const completedCall={...call,completedTime:pacificTime()};
     const remaining=readCalls().filter(c=>c.id!==call.id);
@@ -198,6 +208,7 @@ export default function CallDetailPage() {
           activeCallNumber: undefined
         })
       );
+      await completeCallOnMdt(call);
     }
 
     addActivity(`EMS ${call.emsNumber} completed by ${call.assignedUnit || "Dispatch"}`, "complete");
@@ -400,7 +411,7 @@ export default function CallDetailPage() {
 
             <section className="complete-strip">
               <div><CheckCircle2 size={22}/><div><strong>Ready to close this incident?</strong><span>Call Completed moves the incident to Completed Calls; it is not deleted.</span></div></div>
-              <button type="button" onClick={completeCall}><CheckCircle2 size={18}/> Call Completed</button>
+              <button type="button" onClick={()=>void completeCall()}><CheckCircle2 size={18}/> Call Completed</button>
             </section>
           </div>
         </section>
@@ -429,7 +440,7 @@ export default function CallDetailPage() {
           <section className="side-card quick-actions">
             <div className="eyebrow">QUICK ACTIONS</div>
             <button type="button"><MessageSquareText size={16}/> Add Call Note</button>
-            <button className="outline-danger" type="button" onClick={completeCall}><X size={16}/> Call Completed</button>
+            <button className="outline-danger" type="button" onClick={()=>void completeCall()}><X size={16}/> Call Completed</button>
           </section>
         </aside>
       </section>

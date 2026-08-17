@@ -90,7 +90,7 @@ export default function NewCallPage() {
     );
 
     const status: CadCall["status"] = assignedUnit
-      ? holdBackRequired ? "Holding Back" : "Dispatched"
+      ? holdBackRequired ? "Hold Back Required" : "Dispatched"
       : "Unassigned";
 
     const call: CadCall = {

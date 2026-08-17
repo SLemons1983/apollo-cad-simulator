@@ -12,7 +12,7 @@ import { fetchSharedUnitSessions, sendCallToMdt, sendUnitStatusToMdt } from "../
 
 const EMPTY_CREW = ["", "", "", ""];
 const UNIT_STATUSES: ActiveUnitSession["status"][] = [
-  "Dispatched", "En Route", "Holding Back", "At Scene", "Depart Scene",
+  "Logged In - Not Available", "Dispatched", "En Route", "Hold Back Required", "Holding Back", "Scene Secure", "At Scene", "Depart Scene",
   "At Destination", "Pending Paperwork", "Unit Available", "En Route Post",
   "In Area", "At Post", "Out of Service"
 ];
@@ -120,7 +120,7 @@ export default function UnitManagementPage() {
       crewMembers,
       rideAlongType,
       rideAlongName: rideAlongType === "None" ? "" : rideAlongName.trim(),
-      status: "Unit Available",
+      status: "Logged In - Not Available",
       emergencyActive: false,
       loggedOnAt: now,
       updatedAt: now
