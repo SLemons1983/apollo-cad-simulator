@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, BellRing, Pencil, Radio, Save, UserRound, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Ambulance, ArrowLeft, BellRing, MapPin, Pencil, Radio, Save, UserRound, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActiveUnitSession, CadStatus, PHYSICAL_VEHICLES, RIDE_ALONG_TYPES,
+  ActiveUnitSession, CAD_POSTS, CadStatus, PHYSICAL_VEHICLES, RIDE_ALONG_TYPES,
   RideAlongType, UNIT_CONFIG, addActivity, getRadioIdentifiersForVehicle, pacificTime, readCalls,
   readUnitSessions, updateUnitSession, writeCalls, writeUnitSessions
 } from "../../../lib/cad-demo";
-import { fetchSharedUnitSessions, sendCallToMdt, sendUnitStatusToMdt } from "../../../lib/integration-client";
+import { fetchSharedUnitSessions, sendCallToMdt, sendPostToMdt, sendUnitStatusToMdt } from "../../../lib/integration-client";
 
 const EMPTY_CREW = ["", "", "", ""];
 const UNIT_STATUSES: ActiveUnitSession["status"][] = [
@@ -27,6 +27,11 @@ export default function UnitManagementPage() {
   const [rideAlongName, setRideAlongName] = useState("");
   const [editingSessionId, setEditingSessionId] = useState("");
   const [error, setError] = useState("");
+  const [postingUnit, setPostingUnit] = useState("");
+  const [mapError, setMapError] = useState("");
+  const unitMapRef = useRef<HTMLDivElement | null>(null);
+  const unitMapObjectRef = useRef<any>(null);
+  const unitMarkersRef = useRef<globalThis.Map<string, {marker:any; content:HTMLElement}>>(new globalThis.Map());
 
   useEffect(() => {
     setClock(pacificTime());
@@ -39,6 +44,56 @@ export default function UnitManagementPage() {
     const timer = window.setInterval(() => { setClock(pacificTime()); void refreshShared(); }, 2000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const key=process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if(!key){setMapError("Google Maps API key is not configured for CAD.");return}
+    let cancelled=false;
+    const callbackName="__apolloCadUnitMapReady";
+    const init=async()=>{
+      try{
+        const g=(window as any).google;
+        if(cancelled||!unitMapRef.current||!g?.maps)return;
+        const {Map}=await g.maps.importLibrary("maps");
+        unitMapObjectRef.current=new Map(unitMapRef.current,{center:{lat:36.5965,lng:-119.4512},zoom:11,mapId:"DEMO_MAP_ID",disableDefaultUI:true,zoomControl:true,streetViewControl:false,mapTypeControl:false,fullscreenControl:true});
+        setMapError("");
+      }catch(err){console.error("[Apollo CAD] Unit map error:",err);setMapError("The CAD unit map could not be started.")}
+    };
+    const w=window as any;
+    if(w.google?.maps?.importLibrary){void init();return()=>{cancelled=true}}
+    w[callbackName]=()=>{void init();try{delete w[callbackName]}catch{}};
+    const existing=document.getElementById("apollo-cad-google-maps-script");
+    if(!existing){
+      const script=document.createElement("script");script.id="apollo-cad-google-maps-script";script.async=true;script.defer=true;
+      script.src=`https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&loading=async&callback=${callbackName}`;
+      script.onerror=()=>setMapError("Google Maps failed to load on CAD.");document.head.appendChild(script);
+    }
+    return()=>{cancelled=true};
+  },[]);
+
+  useEffect(()=>{
+    const map=unitMapObjectRef.current;const g=(window as any).google;if(!map||!g?.maps)return;
+    let active=true;
+    const update=async()=>{
+      const {AdvancedMarkerElement}=await g.maps.importLibrary("marker");if(!active)return;
+      const located=sessions.filter(session=>typeof session.latitude==="number"&&typeof session.longitude==="number");
+      const ids=new Set(located.map(session=>session.radioIdentifier));
+      for(const [id,entry] of unitMarkersRef.current){if(!ids.has(id)){entry.marker.map=null;unitMarkersRef.current.delete(id)}}
+      for(const session of located){
+        const position={lat:session.latitude!,lng:session.longitude!};const existing=unitMarkersRef.current.get(session.radioIdentifier);
+        if(existing){existing.marker.position=position;existing.marker.title=`${session.radioIdentifier} — ${session.status}`;existing.content.className=`cadAmbulanceMarker${session.emergencyActive?" emergency":""}`;continue}
+        const content=document.createElement("div");content.className=`cadAmbulanceMarker${session.emergencyActive?" emergency":""}`;
+        const icon=document.createElement("div");icon.className="cadAmbulanceBody";icon.textContent=session.radioIdentifier;content.appendChild(icon);
+        const marker=new AdvancedMarkerElement({map,position,title:`${session.radioIdentifier} — ${session.status}`,content});
+        unitMarkersRef.current.set(session.radioIdentifier,{marker,content});
+      }
+      if(located.length&&unitMarkersRef.current.size===located.length){
+        const bounds=new g.maps.LatLngBounds();located.forEach(session=>bounds.extend({lat:session.latitude!,lng:session.longitude!}));
+        if(!map.__apolloInitialFit){map.fitBounds(bounds,60);map.__apolloInitialFit=true}
+      }
+    };
+    void update();return()=>{active=false};
+  },[sessions]);
 
   const compatibleRadioIdentifiers = useMemo(
     () => getRadioIdentifiersForVehicle(physicalVehicle),
@@ -203,6 +258,17 @@ export default function UnitManagementPage() {
     addActivity(`${session.radioIdentifier} logged off`, "status");
   }
 
+  async function assignPost(session:ActiveUnitSession,postId:string){
+    const post=CAD_POSTS.find(item=>item.id===postId);if(!post)return;
+    setPostingUnit(session.radioIdentifier);setError("");
+    const result=await sendPostToMdt(session,post);
+    if(result.ok){
+      const next=updateUnitSession(session.radioIdentifier,{activeCallNumber:result.payload?.callNumber,status:"Unit Available"});
+      setSessions(next);addActivity(`${session.radioIdentifier} assigned to ${post.name} Post — ${post.coverage}`,"assignment");
+    }else setError(`Post assignment for ${session.radioIdentifier} could not be sent to the MDT.`);
+    setPostingUnit("");
+  }
+
   return (
     <main className="form-page-shell">
       <header className="topbar">
@@ -250,6 +316,12 @@ export default function UnitManagementPage() {
 
           <section className="form-card">
             <div className="section-title">Currently Logged-On Units — {sessions.length}</div>
+            <div className="cad-unit-map-shell">
+              <div className="cad-unit-map-heading"><div><MapPin size={17}/><strong>Live Unit Locations</strong></div><span>{sessions.filter(session=>typeof session.latitude==="number"&&typeof session.longitude==="number").length} reporting GPS</span></div>
+              <div ref={unitMapRef} className="cad-unit-map"/>
+              {mapError&&<div className="cad-unit-map-error">{mapError}</div>}
+              {sessions.length>0&&sessions.every(session=>typeof session.latitude!=="number"||typeof session.longitude!=="number")&&<div className="cad-unit-map-wait"><Ambulance size={20}/>Waiting for MDT location reports…</div>}
+            </div>
             <div className="managed-unit-list">
               {sessions.map(session => {
                 const unit = UNIT_CONFIG.find(item => item.radioId === session.radioIdentifier);
@@ -265,6 +337,7 @@ export default function UnitManagementPage() {
                   </div>
                   <div className="managed-unit-controls">
                     <label><span>Unit Status</span><select value={session.status} onChange={event => void changeStatus(session, event.target.value as ActiveUnitSession["status"])}>{UNIT_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}</select></label>
+                    <label><span>Assign Post</span><select value="" disabled={postingUnit===session.radioIdentifier||session.status!=="Unit Available"||Boolean(session.activeCallNumber)} onChange={event=>void assignPost(session,event.target.value)}><option value="">{session.status!=="Unit Available"?"Unit must be Available":session.activeCallNumber?"Unit already assigned":"Select post…"}</option>{CAD_POSTS.map(post=><option key={post.id} value={post.id}>{post.name} — {post.coverage}</option>)}</select></label>
                     <div className="managed-unit-actions">
                       <button type="button" className="secondary-action" onClick={() => beginEdit(session)}><Pencil size={15}/> Change Crew</button>
                       <button type="button" className="secondary-action danger-action" onClick={() => void logOffUnit(session)}><X size={15}/> Log Off</button>

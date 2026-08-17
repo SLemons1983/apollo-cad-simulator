@@ -72,21 +72,42 @@ export default function CallDetailPage() {
         const current=readCalls().find(c=>c.id===params.id);
         if(!current?.assignedUnit)return;
         const event=(data.statuses??[]).find((e:any)=>e.radioIdentifier===current.assignedUnit&&e.callNumber===current.cadCallNumber);
+        const sharedCall=(data.calls??[]).find((item:any)=>item.radioIdentifier===current.assignedUnit&&item.callNumber===current.cadCallNumber);
+        const dispositionSource=event?.disposition?event:sharedCall;
         const shared=Array.isArray(data.sessions)?data.sessions.find((row:any)=>row.radio_identifier===current.assignedUnit&&row.active_call_number===current.cadCallNumber):null;
-        const nextStatus=event?.status??shared?.status;
-        if(nextStatus&&nextStatus!==current.status){
-          const updated={...current,status:nextStatus as CadStatus};
+        const nextStatus=(event?.status??shared?.status) as CadStatus|undefined;
+        const statusChanged=Boolean(nextStatus&&nextStatus!==current.status);
+        const dispositionChanged=Boolean(dispositionSource?.disposition&&(
+          dispositionSource.disposition!==current.disposition||
+          (dispositionSource.dispositionDetail??"")!==(current.dispositionDetail??"")||
+          dispositionSource.dispositionTimestamp!==current.dispositionTimestamp
+        ));
+        if(statusChanged||dispositionChanged){
+          const updated:CadCall={
+            ...current,
+            status:nextStatus??current.status,
+            ...(dispositionSource?.disposition?{
+              dispositionCategory:dispositionSource.dispositionCategory,
+              disposition:dispositionSource.disposition,
+              dispositionCode:dispositionSource.dispositionCode,
+              dispositionDetail:dispositionSource.dispositionDetail,
+              dispositionTimestamp:dispositionSource.dispositionTimestamp
+            }: {})
+          };
           writeCalls(readCalls().map(c=>c.id===updated.id?updated:c));
           setCall(updated);
           setAllActive(readCalls());
-          setUnitSessions(
-            updateUnitSession(updated.assignedUnit, {
-              status: updated.status as ActiveUnitSession["status"],
-              activeCallNumber: updated.cadCallNumber
-            })
-          );
-          setHistory(h=>[...h,{id:Date.now(),status:updated.status,time:event?.timestamp?.slice(11,19)??pacificTime(),source:"MDT"}]);
-          addActivity(`${updated.assignedUnit} ${updated.status} on EMS ${updated.emsNumber} (MDT)`,"status");
+          if(statusChanged){
+            setUnitSessions(
+              updateUnitSession(updated.assignedUnit, {
+                status: updated.status as ActiveUnitSession["status"],
+                activeCallNumber: updated.cadCallNumber
+              })
+            );
+            setHistory(h=>[...h,{id:Date.now(),status:updated.status,time:event?.timestamp?.slice(11,19)??pacificTime(),source:"MDT"}]);
+            addActivity(`${updated.assignedUnit} ${updated.status} on EMS ${updated.emsNumber} (MDT)`,"status");
+          }
+          if(dispositionChanged)addActivity(`EMS ${updated.emsNumber} disposition: ${dispositionSource.disposition} (MDT)`,"note");
         }
       }catch{}
     };
@@ -427,6 +448,13 @@ export default function CallDetailPage() {
             </div>
             <button className="dispatch-button" type="button" disabled={!call.assignedUnit} onClick={()=>void sendCallToMdt(call)}><MessageSquareText size={18}/> Send Update to MDT</button>
           </section>
+
+          {call.disposition&&<section className={`side-card disposition-card ${call.dispositionCategory==="Non-Transport"?"non-transport":"transport"}`}>
+            <div className="eyebrow">MDT PATIENT DISPOSITION</div>
+            <div className="cad-disposition-title"><CheckCircle2 size={20}/><strong>{call.disposition}</strong></div>
+            {call.dispositionDetail&&<p>{call.dispositionDetail}</p>}
+            {call.dispositionTimestamp&&<small>Recorded by MDT · {new Date(call.dispositionTimestamp).toLocaleTimeString("en-US",{timeZone:"America/Los_Angeles",hour12:false})} Pacific</small>}
+          </section>}
 
           <section className="side-card">
             <div className="eyebrow">STATUS HISTORY · PACIFIC TIME</div>

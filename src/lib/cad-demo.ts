@@ -37,6 +37,11 @@ export type CadCall = {
   dispatchComments: string;
   premiseNotes: string;
   cautionNotes: string;
+  dispositionCategory?: "Transport" | "Non-Transport";
+  disposition?: string;
+  dispositionCode?: string;
+  dispositionDetail?: string;
+  dispositionTimestamp?: string;
   createdTime: string;
   completedTime?: string;
 };

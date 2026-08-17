@@ -7,6 +7,11 @@ export type MdtStatusEvent = {
   source: string;
   latitude?: number;
   longitude?: number;
+  dispositionCategory?: "Transport" | "Non-Transport";
+  disposition?: string;
+  dispositionCode?: string;
+  dispositionDetail?: string;
+  dispositionTimestamp?: string;
 };
 
 export type MdtEmergencyEvent = {
