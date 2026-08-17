@@ -69,16 +69,25 @@ export type UnitStatus =
   | "Out of Service";
 
 export type CadPost = {
-  id: "reedley" | "parlier" | "orange-cove";
+  id:
+    | "reedley-1" | "reedley-2" | "reedley-3" | "reedley-4" | "reedley-5"
+    | "parlier-1" | "parlier-2"
+    | "orange-cove-1" | "orange-cove-2";
   name: string;
   coverage: string;
   address: string;
 };
 
 export const CAD_POSTS: CadPost[] = [
-  { id:"reedley", name:"Reedley", coverage:"1st - 5th Out", address:"500 E. 11th Street, Reedley, CA 93654" },
-  { id:"parlier", name:"Parlier", coverage:"1st - 2nd Out", address:"320 S Newmark Ave, Parlier, CA 93648" },
-  { id:"orange-cove", name:"Orange Cove", coverage:"1st - 2nd Out", address:"725 Anchor Ave, Orange Cove, CA 93646" }
+  { id:"reedley-1", name:"Reedley", coverage:"First Out", address:"500 E. 11th Street, Reedley, CA 93654" },
+  { id:"reedley-2", name:"Reedley", coverage:"Second Out", address:"500 E. 11th Street, Reedley, CA 93654" },
+  { id:"reedley-3", name:"Reedley", coverage:"Third Out", address:"500 E. 11th Street, Reedley, CA 93654" },
+  { id:"reedley-4", name:"Reedley", coverage:"Fourth Out", address:"500 E. 11th Street, Reedley, CA 93654" },
+  { id:"reedley-5", name:"Reedley", coverage:"Fifth Out", address:"500 E. 11th Street, Reedley, CA 93654" },
+  { id:"parlier-1", name:"Parlier", coverage:"First Out", address:"320 S Newmark Ave, Parlier, CA 93648" },
+  { id:"parlier-2", name:"Parlier", coverage:"Second Out", address:"320 S Newmark Ave, Parlier, CA 93648" },
+  { id:"orange-cove-1", name:"Orange Cove", coverage:"First Out", address:"725 Anchor Ave, Orange Cove, CA 93646" },
+  { id:"orange-cove-2", name:"Orange Cove", coverage:"Second Out", address:"725 Anchor Ave, Orange Cove, CA 93646" }
 ];
 
 export type ActiveUnitSession = {
